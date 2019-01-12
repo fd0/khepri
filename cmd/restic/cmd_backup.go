@@ -82,6 +82,8 @@ type BackupOptions struct {
 	FilesFrom        []string
 	TimeStamp        string
 	WithAtime        bool
+	RootPrefix       string
+	RootStrip        int
 }
 
 var backupOptions BackupOptions
@@ -108,6 +110,8 @@ func init() {
 	f.StringArrayVar(&backupOptions.FilesFrom, "files-from", nil, "read the files to backup from file (can be combined with file args/can be specified multiple times)")
 	f.StringVar(&backupOptions.TimeStamp, "time", "", "time of the backup (ex. '2012-11-01 22:08:41') (default: now)")
 	f.BoolVar(&backupOptions.WithAtime, "with-atime", false, "store the atime for all files and directories")
+	f.StringVar(&backupOptions.RootPrefix, "prefix", "", "apply a prefix to target paths")
+	f.IntVar(&backupOptions.RootStrip, "strip-components", 0, "strip `n` leading components from target paths")
 }
 
 // filterExisting returns a slice of all existing items, or an error if no
@@ -363,7 +367,7 @@ func findParentSnapshot(ctx context.Context, repo restic.Repository, opts Backup
 
 	// Find last snapshot to set it as parent, if not already set
 	if !opts.Force && parentID == nil {
-		id, err := restic.FindLatestSnapshot(ctx, repo, targets, []restic.TagList{}, opts.Host)
+		id, err := restic.FindLatestSnapshot(ctx, repo, targets, []restic.TagList{}, opts.Host, opts.RootPrefix, opts.RootStrip)
 		if err == nil {
 			parentID = &id
 		} else if err != restic.ErrNoSnapshotFound {
@@ -516,6 +520,8 @@ func runBackup(opts BackupOptions, gopts GlobalOptions, term *termstatus.Termina
 		Time:           timeStamp,
 		Hostname:       opts.Host,
 		ParentSnapshot: *parentSnapshotID,
+		RootPrefix:     opts.RootPrefix,
+		RootStrip:      opts.RootStrip,
 	}
 
 	uploader := archiver.IndexUploader{

@@ -1492,6 +1492,92 @@ func TestArchiverSnapshotSelect(t *testing.T) {
 	}
 }
 
+func TestArchiverSnapshotPrefixStrip(t *testing.T) {
+	var tests = []struct {
+		name    string
+		src     TestDir
+		want    []string
+		chdir   string
+		targets []string
+		strip   int
+		prefix  string
+	}{
+		{
+			name: "prefix-relative",
+			src: TestDir{
+				"foo": TestFile{Content: "foo"},
+			},
+			targets: []string{"foo"},
+			prefix:  "prefix",
+			want:    []string{"prefix/foo"},
+		},
+		{
+			name: "prefix-absolute",
+			src: TestDir{
+				"foo": TestFile{Content: "foo"},
+			},
+			targets: []string{"foo"},
+			prefix:  "/home/user/work",
+			want:    []string{"/home/user/work/foo"},
+		},
+		{
+			name: "strip-1",
+			src: TestDir{
+				"one": TestDir{
+					"two": TestDir{
+						"three": TestFile{Content: "three"},
+					},
+				},
+			},
+			targets: []string{"one/two"},
+			prefix:  "/prefix",
+			strip:   1,
+			want:    []string{"/prefix/two"},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+
+			tempdir, repo, cleanup := prepareTempdirRepoSrc(t, test.src)
+			defer cleanup()
+
+			arch := New(repo, fs.Track{FS: fs.Local{}}, Options{})
+
+			chdir := tempdir
+			if test.chdir != "" {
+				chdir = filepath.Join(chdir, filepath.FromSlash(test.chdir))
+			}
+
+			back := fs.TestChdir(t, chdir)
+			defer back()
+
+			var targets []string
+			for _, target := range test.targets {
+				targets = append(targets, os.ExpandEnv(target))
+			}
+
+			t.Logf("targets: %v", targets)
+			_, snapshotID, err := arch.Snapshot(ctx, targets, SnapshotOptions{Time: time.Now(), RootPrefix: test.prefix, RootStrip: test.strip})
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			t.Logf("saved as %v", snapshotID.Str())
+
+			want := test.want
+			if want == nil {
+				want = test.targets
+			}
+			TestEnsureSnapshotPaths(t, repo, snapshotID, want)
+
+			checker.TestCheckRepo(t, repo)
+		})
+	}
+}
+
 // MockFS keeps track which files are read.
 type MockFS struct {
 	fs.FS

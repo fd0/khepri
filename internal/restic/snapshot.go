@@ -27,17 +27,58 @@ type Snapshot struct {
 	id *ID // plaintext ID, used during restore
 }
 
+// pathSplit takes a path and returns its root part and a list of its path elements.
+// For absolute paths, root result is "/" for Unix and Plan9, drive letter for Windows.
+// For relative paths, root result is empty.
+func pathSplit(path string) (root string, lst []string) {
+        root = path
+        for {
+		var file string
+		root, file = filepath.Split(filepath.Clean(root))
+		if file == "." || file == "" {
+			break
+		}
+		lst = append([]string{file}, lst...)
+	}
+	return
+}
+
+
+// pathStripPrefix strips zero or more leading path elements from a path
+// and optionally applies a prefix. Finally, if no prefix or stripping are applied,
+// absolute path is resolved.
+func pathStripPrefix(path string, prefix string, strip int) string {
+	pathRoot, pathList := pathSplit(path)
+	if strip > 0 {
+		stripFinal := strip
+		if pathRoot != "" {
+			if pathRoot != "/" {
+				stripFinal--
+			}
+			pathRoot = ""
+		}
+		if stripFinal > len(pathList) {
+			stripFinal = len(pathList)
+		}
+		pathList = pathList[stripFinal:]
+	}
+	if prefix != "" {
+		pathRoot = prefix
+	} else if strip == 0 {
+		absPath, err := filepath.Abs(pathRoot)
+		if err == nil {
+			pathRoot = absPath
+		}
+	}
+	return filepath.Clean(filepath.Join(append([]string{pathRoot}, pathList...)...))
+}
+
 // NewSnapshot returns an initialized snapshot struct for the current user and
 // time.
-func NewSnapshot(paths []string, tags []string, hostname string, time time.Time) (*Snapshot, error) {
+func NewSnapshot(paths []string, tags []string, hostname string, time time.Time, prefix string, strip int) (*Snapshot, error) {
 	absPaths := make([]string, 0, len(paths))
 	for _, path := range paths {
-		p, err := filepath.Abs(path)
-		if err == nil {
-			absPaths = append(absPaths, p)
-		} else {
-			absPaths = append(absPaths, path)
-		}
+		absPaths = append(absPaths, pathStripPrefix(path, prefix, strip))
 	}
 
 	sn := &Snapshot{
