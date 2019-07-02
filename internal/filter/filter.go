@@ -159,12 +159,19 @@ func match(patterns, strs []string) (matched bool, err error) {
 	return false, nil
 }
 
-// List returns true if str matches one of the patterns. Empty patterns are
-// ignored.
+// List returns true if str matches one of the patterns. Empty
+// patterns are ignored. Patterns prefixed by "!" are negated: any
+// matching file excluded by a previous pattern will become included
+// again.
 func List(patterns []string, str string) (matched bool, childMayMatch bool, err error) {
 	for _, pat := range patterns {
+		var negate bool
 		if pat == "" {
 			continue
+		}
+		if pat[0] == '!' {
+			negate = true
+			pat = pat[1:]
 		}
 
 		m, err := Match(pat, str)
@@ -177,11 +184,12 @@ func List(patterns []string, str string) (matched bool, childMayMatch bool, err 
 			return false, false, err
 		}
 
-		matched = matched || m
-		childMayMatch = childMayMatch || c
-
-		if matched && childMayMatch {
-			return true, true, nil
+		if negate {
+			matched = matched && !m
+			childMayMatch = childMayMatch && !m
+		} else {
+			matched = matched || m
+			childMayMatch = childMayMatch || c
 		}
 	}
 
