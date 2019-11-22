@@ -182,7 +182,7 @@ func TestLoadBlob(t *testing.T) {
 	base := restic.CiphertextLength(length)
 	for _, testlength := range []int{base, base + 7, base + 15, base + 1000} {
 		buf = make([]byte, 0, testlength)
-		n, err := repo.LoadBlob(context.TODO(), restic.DataBlob, id, buf)
+		n, err := repo.LoadBlob(context.TODO(), restic.ZlibBlob, id, buf)
 		if err != nil {
 			t.Errorf("LoadBlob() returned an error for buffer size %v: %v", testlength, err)
 			continue
@@ -304,10 +304,11 @@ func BenchmarkLoadIndex(b *testing.B) {
 	for i := 0; i < 5000; i++ {
 		idx.Store(restic.PackedBlob{
 			Blob: restic.Blob{
-				Type:   restic.DataBlob,
-				Length: 1234,
-				ID:     restic.NewRandomID(),
-				Offset: 1235,
+				Type:         restic.DataBlob,
+				ActualLength: 1234,
+				PackedLength: 1234,
+				ID:           restic.NewRandomID(),
+				Offset:       1235,
 			},
 			PackID: restic.NewRandomID(),
 		})

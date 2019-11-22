@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/restic/restic/internal/crypto"
 	"github.com/restic/restic/internal/debug"
 	"github.com/restic/restic/internal/errors"
 	"github.com/restic/restic/internal/fs"
@@ -47,7 +48,7 @@ func Repack(ctx context.Context, repo restic.Repository, packs restic.IDSet, kee
 		debug.Log("processing pack %v, blobs: %v", packID, len(blobs))
 		var buf []byte
 		for _, entry := range blobs {
-			h := restic.BlobHandle{ID: entry.ID, Type: entry.Type}
+			h := restic.NewBlobHandle(entry.ID, entry.Type)
 			if !keepBlobs.Has(h) {
 				continue
 			}
@@ -55,10 +56,10 @@ func Repack(ctx context.Context, repo restic.Repository, packs restic.IDSet, kee
 			debug.Log("  process blob %v", h)
 
 			buf = buf[:]
-			if uint(len(buf)) < entry.Length {
-				buf = make([]byte, entry.Length)
+			if uint(len(buf)) < entry.PackedLength {
+				buf = make([]byte, entry.PackedLength)
 			}
-			buf = buf[:entry.Length]
+			buf = buf[:entry.PackedLength]
 
 			n, err := tempfile.ReadAt(buf, int64(entry.Offset))
 			if err != nil {
@@ -71,9 +72,36 @@ func Repack(ctx context.Context, repo restic.Repository, packs restic.IDSet, kee
 			}
 
 			nonce, ciphertext := buf[:repo.Key().NonceSize()], buf[repo.Key().NonceSize():]
-			plaintext, err := repo.Key().Open(ciphertext[:0], nonce, ciphertext, nil)
+
+			compressed, err := repo.Key().Open(ciphertext[:0], nonce, ciphertext, nil)
 			if err != nil {
 				return nil, err
+			}
+
+			// Decompress if needed.
+
+			// FIXME: This can be made far more efficient
+			// if we just copy the encrypted/compressed
+			// blob data from the old pack to the new
+			// pack.
+			var plaintext []byte
+
+			switch entry.CompressionType {
+			case restic.CompressionTypeStored:
+				plaintext = compressed
+
+			case restic.CompressionTypeZlib:
+				plaintext, err = crypto.Uncompress(compressed)
+				if err != nil {
+					return nil, errors.Errorf(
+						"decompressing blob %v failed: %v",
+						entry.ID, err)
+				}
+
+			default:
+				return nil, errors.Errorf(
+					"Unknown CompressionType for blob %v failed: %v",
+					entry.ID, err)
 			}
 
 			id := restic.Hash(plaintext)

@@ -7,6 +7,7 @@ import (
 	"os"
 	"sync"
 
+	"github.com/restic/restic/internal/crypto"
 	"github.com/restic/restic/internal/debug"
 	"github.com/restic/restic/internal/errors"
 	"github.com/restic/restic/internal/pack"
@@ -728,10 +729,10 @@ func checkPack(ctx context.Context, r restic.Repository, id restic.ID) error {
 		debug.Log("  check blob %d: %v", i, blob)
 
 		buf = buf[:cap(buf)]
-		if uint(len(buf)) < blob.Length {
-			buf = make([]byte, blob.Length)
+		if uint(len(buf)) < blob.PackedLength {
+			buf = make([]byte, blob.PackedLength)
 		}
-		buf = buf[:blob.Length]
+		buf = buf[:blob.PackedLength]
 
 		_, err := packfile.Seek(int64(blob.Offset), 0)
 		if err != nil {
@@ -746,11 +747,30 @@ func checkPack(ctx context.Context, r restic.Repository, id restic.ID) error {
 		}
 
 		nonce, ciphertext := buf[:r.Key().NonceSize()], buf[r.Key().NonceSize():]
-		plaintext, err := r.Key().Open(ciphertext[:0], nonce, ciphertext, nil)
+		compressed, err := r.Key().Open(ciphertext[:0], nonce, ciphertext, nil)
 		if err != nil {
 			debug.Log("  error decrypting blob %v: %v", blob.ID, err)
 			errs = append(errs, errors.Errorf("blob %v: %v", i, err))
 			continue
+		}
+
+		// Decompress if needed
+		var plaintext []byte
+
+		switch blob.CompressionType {
+		case restic.CompressionTypeStored:
+			plaintext = compressed
+
+		case restic.CompressionTypeZlib:
+			plaintext, err = crypto.Uncompress(compressed)
+			if err != nil {
+				return errors.Errorf(
+					"decompressing blob %v failed: %v", id, err)
+			}
+
+		default:
+			return errors.Errorf(
+				"Unknown CompressionType for blob %v failed: %v", id, err)
 		}
 
 		hash := restic.Hash(plaintext)

@@ -85,33 +85,39 @@ func newTestRepo(content []TestFile) *TestRepo {
 	filesPathToContent := make(map[string]string)
 
 	for _, file := range content {
-		var content string
+		var content_str string
 		for _, blob := range file.blobs {
-			content += blob.data
+			compress_data := crypto.Compress([]byte(blob.data))
+			content_str += blob.data
 
 			// get the pack, create as necessary
 			var pack Pack
 			var found bool
 			if pack, found = packs[blob.pack]; !found {
-				pack = Pack{name: blob.pack, blobs: make(map[restic.ID]restic.Blob)}
+				pack = Pack{name: blob.pack,
+					blobs: make(map[restic.ID]restic.Blob)}
 			}
 
-			// calculate blob id and add to the pack as necessary
+			// calculate blob id and add to the pack as
+			// necessary. The blob id is always the hash
+			// of the plain text.
 			blobID := restic.Hash([]byte(blob.data))
 			if _, found := pack.blobs[blobID]; !found {
-				blobData := seal([]byte(blob.data))
+				blobData := seal([]byte(compress_data))
 				pack.blobs[blobID] = restic.Blob{
-					Type:   restic.DataBlob,
-					ID:     blobID,
-					Length: uint(len(blobData)),
-					Offset: uint(len(pack.data)),
+					Type:            restic.ZlibBlob,
+					CompressionType: restic.CompressionTypeZlib,
+					ID:              blobID,
+					ActualLength:    uint(len(blob.data)),
+					PackedLength:    uint(len(blobData)),
+					Offset:          uint(len(pack.data)),
 				}
 				pack.data = append(pack.data, blobData...)
 			}
 
 			packs[blob.pack] = pack
 		}
-		filesPathToContent[file.name] = content
+		filesPathToContent[file.name] = content_str
 	}
 
 	blobs := make(map[restic.ID][]restic.PackedBlob)

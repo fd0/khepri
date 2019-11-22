@@ -152,15 +152,8 @@ func New(ctx context.Context, repo Lister, ignorePacks restic.IDSet, p *restic.P
 }
 
 type packJSON struct {
-	ID    restic.ID  `json:"id"`
-	Blobs []blobJSON `json:"blobs"`
-}
-
-type blobJSON struct {
-	ID     restic.ID       `json:"id"`
-	Type   restic.BlobType `json:"type"`
-	Offset uint            `json:"offset"`
-	Length uint            `json:"length"`
+	ID    restic.ID         `json:"id"`
+	Blobs []restic.BlobJSON `json:"blobs"`
 }
 
 type indexJSON struct {
@@ -217,13 +210,7 @@ func Load(ctx context.Context, repo ListLoader, p *restic.Progress) (*Index, err
 		for _, jpack := range idx.Packs {
 			entries := make([]restic.Blob, 0, len(jpack.Blobs))
 			for _, blob := range jpack.Blobs {
-				entry := restic.Blob{
-					ID:     blob.ID,
-					Type:   blob.Type,
-					Offset: blob.Offset,
-					Length: blob.Length,
-				}
-				entries = append(entries, entry)
+				entries = append(entries, blob.ToBlob())
 			}
 
 			if err = index.AddPack(jpack.ID, 0, entries); err != nil {
@@ -286,7 +273,7 @@ func (idx *Index) DuplicateBlobs() (dups restic.BlobSet) {
 
 	for _, p := range idx.Packs {
 		for _, entry := range p.Entries {
-			h := restic.BlobHandle{ID: entry.ID, Type: entry.Type}
+			h := restic.NewBlobHandle(entry.ID, entry.Type)
 			if seen.Has(h) {
 				dups.Insert(h)
 			}
@@ -303,7 +290,7 @@ func (idx *Index) PacksForBlobs(blobs restic.BlobSet) (packs restic.IDSet) {
 
 	for id, p := range idx.Packs {
 		for _, entry := range p.Entries {
-			if blobs.Has(restic.BlobHandle{ID: entry.ID, Type: entry.Type}) {
+			if blobs.Has(restic.NewBlobHandle(entry.ID, entry.Type)) {
 				packs.Insert(id)
 			}
 		}
@@ -326,7 +313,12 @@ var ErrBlobNotFound = errors.New("blob not found in index")
 func (idx *Index) FindBlob(h restic.BlobHandle) (result []Location, err error) {
 	for id, p := range idx.Packs {
 		for _, entry := range p.Entries {
-			if entry.ID.Equal(h.ID) && entry.Type == h.Type {
+			entry_type := entry.Type
+			if entry_type == restic.ZlibBlob {
+				entry_type = restic.DataBlob
+			}
+
+			if entry.ID.Equal(h.ID) && entry_type == h.Type {
 				result = append(result, Location{
 					PackID: id,
 					Blob:   entry,
@@ -363,14 +355,9 @@ func (idx *Index) Save(ctx context.Context, repo Saver, supersedes restic.IDs) (
 
 	for packID, pack := range idx.Packs {
 		debug.Log("%04d add pack %v with %d entries", packs, packID, len(pack.Entries))
-		b := make([]blobJSON, 0, len(pack.Entries))
+		b := make([]restic.BlobJSON, 0, len(pack.Entries))
 		for _, blob := range pack.Entries {
-			b = append(b, blobJSON{
-				ID:     blob.ID,
-				Type:   blob.Type,
-				Offset: blob.Offset,
-				Length: blob.Length,
-			})
+			b = append(b, blob.ToBlobJSON())
 		}
 
 		p := packJSON{

@@ -25,10 +25,45 @@ type Index struct {
 	created    time.Time
 }
 
+// Why not use a PackedBlob here?
 type indexEntry struct {
 	packID restic.ID
 	offset uint
-	length uint
+
+	// New style index entries
+	blob_type        restic.BlobType
+	blob_id          restic.ID
+	actual_length    uint
+	packed_length    uint
+	compression_type uint8
+}
+
+func (idx indexEntry) ToBlob() restic.PackedBlob {
+	return restic.PackedBlob{
+		Blob: restic.Blob{
+			Type:            idx.blob_type,
+			Offset:          idx.offset,
+			ActualLength:    idx.actual_length,
+			PackedLength:    idx.packed_length,
+			CompressionType: idx.compression_type,
+			ID:              idx.blob_id,
+		},
+		PackID: idx.packID,
+	}
+}
+
+func indexEntryFromBlob(blob restic.PackedBlob) indexEntry {
+	debug.Log("indexEntryFromBlob %v", blob)
+
+	return indexEntry{
+		packID:           blob.PackID,
+		blob_id:          blob.ID,
+		offset:           blob.Offset,
+		blob_type:        blob.Type,
+		actual_length:    blob.ActualLength,
+		packed_length:    blob.PackedLength,
+		compression_type: blob.CompressionType,
+	}
 }
 
 // NewIndex returns a new index.
@@ -40,12 +75,8 @@ func NewIndex() *Index {
 }
 
 func (idx *Index) store(blob restic.PackedBlob) {
-	newEntry := indexEntry{
-		packID: blob.PackID,
-		offset: blob.Offset,
-		length: blob.Length,
-	}
-	h := restic.BlobHandle{ID: blob.ID, Type: blob.Type}
+	newEntry := indexEntryFromBlob(blob)
+	h := restic.NewBlobHandle(blob.ID, blob.Type)
 	idx.pack[h] = append(idx.pack[h], newEntry)
 }
 
@@ -114,23 +145,17 @@ func (idx *Index) Lookup(id restic.ID, tpe restic.BlobType) (blobs []restic.Pack
 	idx.m.Lock()
 	defer idx.m.Unlock()
 
-	h := restic.BlobHandle{ID: id, Type: tpe}
+	return idx._lookup(id, tpe)
+}
+
+func (idx *Index) _lookup(id restic.ID, tpe restic.BlobType) (blobs []restic.PackedBlob, found bool) {
+	h := restic.NewBlobHandle(id, tpe)
 
 	if packs, ok := idx.pack[h]; ok {
 		blobs = make([]restic.PackedBlob, 0, len(packs))
 
 		for _, p := range packs {
-			blob := restic.PackedBlob{
-				Blob: restic.Blob{
-					Type:   tpe,
-					Length: p.length,
-					ID:     id,
-					Offset: p.offset,
-				},
-				PackID: p.packID,
-			}
-
-			blobs = append(blobs, blob)
+			blobs = append(blobs, p.ToBlob())
 		}
 
 		return blobs, true
@@ -144,18 +169,10 @@ func (idx *Index) ListPack(id restic.ID) (list []restic.PackedBlob) {
 	idx.m.Lock()
 	defer idx.m.Unlock()
 
-	for h, packList := range idx.pack {
+	for _, packList := range idx.pack {
 		for _, entry := range packList {
 			if entry.packID == id {
-				list = append(list, restic.PackedBlob{
-					Blob: restic.Blob{
-						ID:     h.ID,
-						Type:   h.Type,
-						Length: entry.length,
-						Offset: entry.offset,
-					},
-					PackID: entry.packID,
-				})
+				list = append(list, entry.ToBlob())
 			}
 		}
 	}
@@ -168,8 +185,7 @@ func (idx *Index) Has(id restic.ID, tpe restic.BlobType) bool {
 	idx.m.Lock()
 	defer idx.m.Unlock()
 
-	h := restic.BlobHandle{ID: id, Type: tpe}
-
+	h := restic.NewBlobHandle(id, tpe)
 	_, ok := idx.pack[h]
 	return ok
 }
@@ -182,7 +198,8 @@ func (idx *Index) LookupSize(id restic.ID, tpe restic.BlobType) (plaintextLength
 		return 0, found
 	}
 
-	return uint(restic.PlaintextLength(int(blobs[0].Length))), true
+	//	return uint(restic.PlaintextLength(int(blobs[0].ActualLength))), true
+	return uint(blobs[0].ActualLength), true
 }
 
 // Supersedes returns the list of indexes this index supersedes, if any.
@@ -218,20 +235,12 @@ func (idx *Index) Each(ctx context.Context) <-chan restic.PackedBlob {
 			close(ch)
 		}()
 
-		for h, packs := range idx.pack {
+		for _, packs := range idx.pack {
 			for _, blob := range packs {
 				select {
 				case <-ctx.Done():
 					return
-				case ch <- restic.PackedBlob{
-					Blob: restic.Blob{
-						ID:     h.ID,
-						Type:   h.Type,
-						Offset: blob.offset,
-						Length: blob.length,
-					},
-					PackID: blob.packID,
-				}:
+				case ch <- blob.ToBlob():
 				}
 			}
 		}
@@ -273,16 +282,11 @@ func (idx *Index) Count(t restic.BlobType) (n uint) {
 }
 
 type packJSON struct {
-	ID    restic.ID  `json:"id"`
-	Blobs []blobJSON `json:"blobs"`
+	ID    restic.ID         `json:"id"`
+	Blobs []restic.BlobJSON `json:"blobs"`
 }
 
-type blobJSON struct {
-	ID     restic.ID       `json:"id"`
-	Type   restic.BlobType `json:"type"`
-	Offset uint            `json:"offset"`
-	Length uint            `json:"length"`
-}
+// The index is a json document mapping packs to blobs.
 
 // generatePackList returns a list of packs.
 func (idx *Index) generatePackList() ([]*packJSON, error) {
@@ -299,7 +303,7 @@ func (idx *Index) generatePackList() ([]*packJSON, error) {
 
 			if blob.packID.IsNull() {
 				debug.Log("blob %v has no packID! (offset %v, length %v)",
-					h, blob.offset, blob.length)
+					h, blob.offset, blob.actual_length)
 				return nil, errors.Errorf("unable to serialize index: pack for blob %v hasn't been written yet", h)
 			}
 
@@ -315,12 +319,7 @@ func (idx *Index) generatePackList() ([]*packJSON, error) {
 			}
 
 			// add blob
-			p.Blobs = append(p.Blobs, blobJSON{
-				ID:     h.ID,
-				Type:   h.Type,
-				Offset: blob.offset,
-				Length: blob.length,
-			})
+			p.Blobs = append(p.Blobs, blob.ToBlob().ToBlobJSON())
 		}
 	}
 
@@ -456,8 +455,8 @@ var ErrOldIndexFormat = errors.New("index has old format")
 // DecodeIndex loads and unserializes an index from rd.
 func DecodeIndex(buf []byte) (idx *Index, err error) {
 	debug.Log("Start decoding index")
-	idxJSON := &jsonIndex{}
 
+	idxJSON := &jsonIndex{}
 	err = json.Unmarshal(buf, idxJSON)
 	if err != nil {
 		debug.Log("Error %v", err)
@@ -476,17 +475,12 @@ func DecodeIndex(buf []byte) (idx *Index, err error) {
 
 		for _, blob := range pack.Blobs {
 			idx.store(restic.PackedBlob{
-				Blob: restic.Blob{
-					Type:   blob.Type,
-					ID:     blob.ID,
-					Offset: blob.Offset,
-					Length: blob.Length,
-				},
+				Blob:   blob.ToBlob(),
 				PackID: pack.ID,
 			})
 
 			switch blob.Type {
-			case restic.DataBlob:
+			case restic.ZlibBlob, restic.DataBlob:
 				data = true
 			case restic.TreeBlob:
 				tree = true
@@ -521,12 +515,7 @@ func DecodeOldIndex(buf []byte) (idx *Index, err error) {
 
 		for _, blob := range pack.Blobs {
 			idx.store(restic.PackedBlob{
-				Blob: restic.Blob{
-					Type:   blob.Type,
-					ID:     blob.ID,
-					Offset: blob.Offset,
-					Length: blob.Length,
-				},
+				Blob:   blob.ToBlob(),
 				PackID: pack.ID,
 			})
 
