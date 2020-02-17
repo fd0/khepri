@@ -47,6 +47,7 @@ type Node struct {
 	Device             uint64              `json:"device,omitempty"` // in case of Type == "dev", stat.st_rdev
 	Content            IDs                 `json:"content"`
 	Subtree            *ID                 `json:"subtree,omitempty"`
+	Subtrees           []*ID               `json:"subtrees,omitempty"`
 
 	Error string `json:"error,omitempty"`
 
@@ -430,6 +431,8 @@ func (node Node) Equals(other Node) bool {
 	if !node.sameExtendedAttributes(other) {
 		return false
 	}
+	// testing of Subtree can maybe omitted as Subtree should be only filled
+	// during Unmarshal and not in internal data sets...
 	if node.Subtree != nil {
 		if other.Subtree == nil {
 			return false
@@ -440,6 +443,23 @@ func (node Node) Equals(other Node) bool {
 		}
 	} else {
 		if other.Subtree != nil {
+			return false
+		}
+	}
+	if node.Subtrees != nil {
+		if other.Subtrees == nil {
+			return false
+		}
+		if len(node.Subtrees) != len(other.Subtrees) {
+			return false
+		}
+		for i := range node.Subtrees {
+			if !node.Subtrees[i].Equal(*other.Subtrees[i]) {
+				return false
+			}
+		}
+	} else {
+		if other.Subtrees != nil {
 			return false
 		}
 	}
