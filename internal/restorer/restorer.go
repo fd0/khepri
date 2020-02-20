@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/restic/chunker"
 	"github.com/restic/restic/internal/crypto"
 	"github.com/restic/restic/internal/errors"
 
@@ -292,7 +293,11 @@ func (res *Restorer) Snapshot() *restic.Snapshot {
 func (res *Restorer) VerifyFiles(ctx context.Context, dst string) (int, error) {
 	// TODO multithreaded?
 
-	count := 0
+	var (
+		buf   = make([]byte, 0, chunker.MaxSize)
+		count = 0
+	)
+
 	err := res.traverseTree(ctx, dst, string(filepath.Separator), *res.sn.Tree, treeVisitor{
 		enterDir: func(node *restic.Node, target, location string) error { return nil },
 		visitNode: func(node *restic.Node, target, location string) error {
@@ -318,7 +323,8 @@ func (res *Restorer) VerifyFiles(ctx context.Context, dst string) (int, error) {
 			for _, blobID := range node.Content {
 				blobs, _ := res.repo.Index().Lookup(blobID, restic.DataBlob)
 				length := blobs[0].Length - uint(crypto.Extension)
-				buf := make([]byte, length) // TODO do I want to reuse the buffer somehow?
+				buf = buf[:length]
+
 				_, err = file.ReadAt(buf, offset)
 				if err != nil {
 					_ = file.Close()
