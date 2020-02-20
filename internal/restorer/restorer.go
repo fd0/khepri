@@ -4,14 +4,15 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 
-	"github.com/restic/chunker"
 	"github.com/restic/restic/internal/crypto"
-	"github.com/restic/restic/internal/errors"
-
 	"github.com/restic/restic/internal/debug"
+	"github.com/restic/restic/internal/errors"
 	"github.com/restic/restic/internal/fs"
 	"github.com/restic/restic/internal/restic"
+
+	"golang.org/x/sync/errgroup"
 )
 
 // Restorer is used to restore a snapshot to a directory.
@@ -286,66 +287,110 @@ func (res *Restorer) Snapshot() *restic.Snapshot {
 	return res.sn
 }
 
+// Number of workers in VerifyFiles.
+const nVerifyWorkers = 8
+
 // VerifyFiles checks whether all regular files in the snapshot res.sn
 // have been successfully written to dst. It stops when it encounters an
 // error. It returns that error and the number of files it has checked,
 // including the file(s) that caused errors.
 func (res *Restorer) VerifyFiles(ctx context.Context, dst string) (int, error) {
-	// TODO multithreaded?
+	type mustCheck struct {
+		node *restic.Node
+		path string
+	}
 
 	var (
-		buf   = make([]byte, 0, chunker.MaxSize)
-		count = 0
+		nchecked uint64
+		work     = make(chan mustCheck, 2*nVerifyWorkers)
 	)
 
-	err := res.traverseTree(ctx, dst, string(filepath.Separator), *res.sn.Tree, treeVisitor{
-		enterDir: func(node *restic.Node, target, location string) error { return nil },
-		visitNode: func(node *restic.Node, target, location string) error {
-			if node.Type != "file" {
-				return nil
-			}
+	g, ctx := errgroup.WithContext(ctx)
 
-			count++
-			stat, err := os.Stat(target)
-			if err != nil {
-				return err
-			}
-			if int64(node.Size) != stat.Size() {
-				return errors.Errorf("Invalid file size: expected %d got %d", node.Size, stat.Size())
-			}
+	// Traverse tree and send jobs to work.
+	g.Go(func() error {
+		defer close(work)
 
-			file, err := os.Open(target)
-			if err != nil {
-				return err
-			}
-
-			offset := int64(0)
-			for _, blobID := range node.Content {
-				blobs, _ := res.repo.Index().Lookup(blobID, restic.DataBlob)
-				length := blobs[0].Length - uint(crypto.Extension)
-				buf = buf[:length]
-
-				_, err = file.ReadAt(buf, offset)
-				if err != nil {
-					_ = file.Close()
-					return err
+		return res.traverseTree(ctx, dst, string(filepath.Separator), *res.sn.Tree, treeVisitor{
+			enterDir: func(node *restic.Node, target, location string) error { return nil },
+			visitNode: func(node *restic.Node, target, _ string) error {
+				if node.Type != "file" {
+					return nil
 				}
-				if !blobID.Equal(restic.Hash(buf)) {
-					_ = file.Close()
-					return errors.Errorf("Unexpected contents starting at offset %d", offset)
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				case work <- mustCheck{node, target}:
+					return nil
 				}
-				offset += int64(length)
-			}
-
-			err = file.Close()
-			if err != nil {
-				return err
-			}
-
-			return nil
-		},
-		leaveDir: func(node *restic.Node, target, location string) error { return nil },
+			},
+			leaveDir: func(node *restic.Node, target, location string) error { return nil },
+		})
 	})
 
-	return count, err
+	for i := 0; i < nVerifyWorkers; i++ {
+		g.Go(func() (err error) {
+			var buf []byte
+			for job := range work {
+				atomic.AddUint64(&nchecked, 1)
+				buf, err = res.verifyFile(job.path, job.node, buf)
+				if err != nil {
+					break
+				}
+			}
+			return
+		})
+	}
+
+	return int(nchecked), g.Wait()
+}
+
+// Verify that the file target has the contents of node.
+// buf and the first return value are scratch space, passed around for reuse.
+func (res *Restorer) verifyFile(target string, node *restic.Node, buf []byte) ([]byte, error) {
+	f, err := os.Open(target)
+	if err != nil {
+		return buf, err
+	}
+	defer f.Close()
+
+	fi, err := f.Stat()
+	switch {
+	case err != nil:
+		return nil, err
+	case int64(node.Size) != fi.Size():
+		return buf, errors.Errorf("Invalid file size for %s: expected %d, got %d",
+			target, node.Size, fi.Size())
+	}
+
+	var offset int64
+	for _, blobID := range node.Content {
+		blobs, _ := res.repo.Index().Lookup(blobID, restic.DataBlob)
+		if len(blobs) == 0 {
+			return buf, errors.Errorf("Unable to fetch blob %s", blobID)
+		}
+
+		length := blobs[0].Length - uint(crypto.Extension)
+		if length > uint(cap(buf)) {
+			newcap := uint(2 * cap(buf))
+			if newcap < length {
+				newcap = length
+			}
+			buf = make([]byte, newcap)
+		}
+		buf = buf[:length]
+
+		_, err = f.ReadAt(buf, offset)
+		if err != nil {
+			return buf, err
+		}
+		if !blobID.Equal(restic.Hash(buf)) {
+			return buf, errors.Errorf(
+				"Unexpected content in %s, starting at offset %d",
+				target, offset)
+		}
+		offset += int64(length)
+	}
+
+	return buf, nil
 }
