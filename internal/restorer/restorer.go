@@ -372,11 +372,7 @@ func (res *Restorer) verifyFile(target string, node *restic.Node, buf []byte) ([
 
 		length := blobs[0].Length - uint(crypto.Extension)
 		if length > uint(cap(buf)) {
-			newcap := uint(2 * cap(buf))
-			if newcap < length {
-				newcap = length
-			}
-			buf = make([]byte, newcap)
+			buf = make([]byte, 2*length)
 		}
 		buf = buf[:length]
 
