@@ -32,6 +32,25 @@ func NewRetryBackend(be restic.Backend, maxTries int, report func(string, error,
 	}
 }
 
+// retryNotifyErrorWithSuccess is an extension of backoff.RetryNotify with notification of success after an error
+// success is NOT notified on the first run of operation (only after an error)
+func retryNotifyErrorWithSuccess(operation backoff.Operation, b backoff.BackOff, notify backoff.Notify, success func()) error {
+	if success == nil {
+		return backoff.RetryNotify(operation, b, notify)
+	}
+	errorDetected := false
+	operationWrapper := func() error {
+		err := operation()
+		if err != nil {
+			errorDetected = true
+		} else if errorDetected {
+			success()
+		}
+		return err
+	}
+	return backoff.RetryNotify(operationWrapper, b, notify)
+}
+
 func (be *RetryBackend) retry(ctx context.Context, msg string, f func() error) error {
 	err := backoff.RetryNotify(f,
 		backoff.WithContext(backoff.WithMaxRetries(backoff.NewExponentialBackOff(), uint64(be.MaxTries)), ctx),
