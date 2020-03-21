@@ -259,7 +259,7 @@ func TestNotifyWithSuccessIsNotCalled(t *testing.T) {
 		t.Fatal("Notify should not have been called")
 	}
 
-	success := func() {
+	success := func(retries int) {
 		t.Fatal("Success should not have been called")
 	}
 
@@ -285,7 +285,7 @@ func TestNotifyWithSuccessIsCalled(t *testing.T) {
 	}
 
 	successCalled := 0
-	success := func() {
+	success := func(retries int) {
 		successCalled++
 	}
 
