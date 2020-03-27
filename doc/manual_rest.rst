@@ -46,6 +46,7 @@ Usage help is available:
           --cache-dir string         set the cache directory. (default: use system default cache directory)
           --cleanup-cache            auto remove old cache directories
       -h, --help                     help for restic
+          --insecure-skip-tls-verify skip TLS certificate verification when connecting to the repo (insecure)
           --json                     set output mode to JSON for commands that support it
           --key-hint string          key ID of key to try decrypting first (default: $RESTIC_KEY_HINT)
           --limit-download int       limits downloads to a maximum rate in KiB/s. (default: unlimited)
@@ -97,6 +98,7 @@ command:
           --cacert file              file to load root certificates from (default: use system certificates)
           --cache-dir string         set the cache directory. (default: use system default cache directory)
           --cleanup-cache            auto remove old cache directories
+          --insecure-skip-tls-verify skip TLS certificate verification when connecting to the repo (insecure)
           --json                     set output mode to JSON for commands that support it
           --key-hint string          key ID of key to try decrypting first (default: $RESTIC_KEY_HINT)
           --limit-download int       limits downloads to a maximum rate in KiB/s. (default: unlimited)
