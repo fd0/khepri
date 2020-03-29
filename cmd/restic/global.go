@@ -377,10 +377,10 @@ func OpenRepository(opts GlobalOptions) (*repository.Repository, error) {
 	}
 
 	report := func(msg string, err error, d time.Duration) {
-		Warnf("%v returned error, retrying after %v: %v\n", msg, d, err)
+		Verbosef("%v returned error, retrying after %v: %v\n", msg, d, err)
 	}
 	success := func(msg string, retries int) {
-		Warnf("%v operation successful after %d retries\n", msg, retries)
+		Verbosef("%v operation successful after %d retries\n", msg, retries)
 	}
 	be = backend.NewRetryBackend(be, 10, report, success)
 
