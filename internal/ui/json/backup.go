@@ -3,13 +3,13 @@ package json
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"os"
 	"sort"
 	"sync"
 	"time"
 
 	"github.com/restic/restic/internal/archiver"
+	"github.com/restic/restic/internal/json"
 	"github.com/restic/restic/internal/restic"
 	"github.com/restic/restic/internal/ui"
 	"github.com/restic/restic/internal/ui/termstatus"

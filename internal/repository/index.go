@@ -2,12 +2,12 @@ package repository
 
 import (
 	"context"
-	"encoding/json"
 	"io"
 	"sync"
 	"time"
 
 	"github.com/restic/restic/internal/errors"
+	"github.com/restic/restic/internal/json"
 	"github.com/restic/restic/internal/restic"
 
 	"github.com/restic/restic/internal/debug"
@@ -514,18 +514,9 @@ func (idx *Index) TreePacks() restic.IDs {
 	return idx.treePacks
 }
 
-// isErrOldIndex returns true if the error may be caused by an old index
-// format.
-func isErrOldIndex(err error) bool {
-	if e, ok := err.(*json.UnmarshalTypeError); ok && e.Value == "array" {
-		return true
-	}
-
-	return false
-}
-
-// ErrOldIndexFormat means an index with the old format was detected.
-var ErrOldIndexFormat = errors.New("index has old format")
+// ErrDecodeIndex means an index is not in the new JSON format.
+// It might be in the old format.
+var ErrIndexFormat = errors.New("index not in new JSON format")
 
 // DecodeIndex loads and unserializes an index from rd.
 func DecodeIndex(buf []byte) (idx *Index, err error) {
@@ -534,14 +525,8 @@ func DecodeIndex(buf []byte) (idx *Index, err error) {
 
 	err = json.Unmarshal(buf, idxJSON)
 	if err != nil {
-		debug.Log("Error %v", err)
-
-		if isErrOldIndex(err) {
-			debug.Log("index is probably old format, trying that")
-			err = ErrOldIndexFormat
-		}
-
-		return nil, errors.Wrap(err, "Decode")
+		debug.Log("Error %v; index is probably old format", err)
+		return nil, ErrIndexFormat
 	}
 
 	idx = NewIndex()

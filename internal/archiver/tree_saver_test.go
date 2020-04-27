@@ -10,6 +10,7 @@ import (
 
 	"github.com/restic/restic/internal/errors"
 	"github.com/restic/restic/internal/restic"
+	rtest "github.com/restic/restic/internal/test"
 	tomb "gopkg.in/tomb.v2"
 )
 
@@ -50,6 +51,26 @@ func TestTreeSaver(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+}
+
+// Assert that TreeSaver JSON output is exactly what encoding/json produces,
+// regardless of the actual JSON serializer.
+func TestTreeSaverJSON(t *testing.T) {
+	tree := restic.NewTree()
+	tree.Insert(&restic.Node{Name: "foo.txt", Type: "file", Device: 1, Path: "/foo.txt"})
+	tree.Insert(&restic.Node{Name: "bar.txt", Type: "file", Device: 1})
+
+	subtree := restic.NewTree()
+	subtree.Insert(&restic.Node{Name: "foo.txt", Type: "file", Device: 2})
+	subtree.Insert(&restic.Node{Name: "bar.txt", Type: "file", Device: 2})
+	tree.Insert(&restic.Node{Name: "subdir", Type: "dir", Subtree: &restic.ID{}})
+
+	buf, err := treeJSON(tree)
+	rtest.OK(t, err)
+
+	expect := `{"nodes":[{"name":"bar.txt","type":"file","mtime":"0001-01-01T00:00:00Z","atime":"0001-01-01T00:00:00Z","ctime":"0001-01-01T00:00:00Z","uid":0,"gid":0,"device":1,"content":null},{"name":"foo.txt","type":"file","mtime":"0001-01-01T00:00:00Z","atime":"0001-01-01T00:00:00Z","ctime":"0001-01-01T00:00:00Z","uid":0,"gid":0,"device":1,"content":null},{"name":"subdir","type":"dir","mtime":"0001-01-01T00:00:00Z","atime":"0001-01-01T00:00:00Z","ctime":"0001-01-01T00:00:00Z","uid":0,"gid":0,"content":null,"subtree":"0000000000000000000000000000000000000000000000000000000000000000"}]}` + "\n"
+
+	rtest.Equals(t, expect, string(buf))
 }
 
 func TestTreeSaverError(t *testing.T) {

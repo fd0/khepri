@@ -114,11 +114,13 @@ func (c *Checker) LoadIndex(ctx context.Context) (hints []error, errs []error) {
 			var err error
 			var idx *repository.Index
 			idx, buf, err = repository.LoadIndexWithDecoder(ctx, c.repo, buf[:0], fi.ID, repository.DecodeIndex)
-			if errors.Cause(err) == repository.ErrOldIndexFormat {
-				debug.Log("index %v has old format", fi.ID.Str())
-				hints = append(hints, ErrOldIndexFormat{fi.ID})
 
+			if errors.Cause(err) == repository.ErrIndexFormat {
 				idx, buf, err = repository.LoadIndexWithDecoder(ctx, c.repo, buf[:0], fi.ID, repository.DecodeOldIndex)
+				if err == nil {
+					debug.Log("index %v has old format", fi.ID.Str())
+					hints = append(hints, ErrOldIndexFormat{fi.ID})
+				}
 			}
 
 			err = errors.Wrapf(err, "error loading index %v", fi.ID.Str())

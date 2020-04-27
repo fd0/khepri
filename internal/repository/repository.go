@@ -3,7 +3,6 @@ package repository
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -14,6 +13,7 @@ import (
 	"github.com/restic/restic/internal/errors"
 	"github.com/restic/restic/internal/fs"
 	"github.com/restic/restic/internal/hashing"
+	"github.com/restic/restic/internal/json"
 	"github.com/restic/restic/internal/pack"
 	"github.com/restic/restic/internal/restic"
 
@@ -448,7 +448,7 @@ func (r *Repository) LoadIndex(ctx context.Context) error {
 			var err error
 			var idx *Index
 			idx, buf, err = LoadIndexWithDecoder(ctx, r, buf[:0], fi.ID, DecodeIndex)
-			if err != nil && errors.Cause(err) == ErrOldIndexFormat {
+			if err != nil && errors.Cause(err) == ErrIndexFormat {
 				idx, buf, err = LoadIndexWithDecoder(ctx, r, buf[:0], fi.ID, DecodeOldIndex)
 			}
 
@@ -570,8 +570,7 @@ func LoadIndex(ctx context.Context, repo restic.Repository, id restic.ID) (*Inde
 		return idx, nil
 	}
 
-	if errors.Cause(err) == ErrOldIndexFormat {
-		fmt.Fprintf(os.Stderr, "index %v has old format\n", id.Str())
+	if errors.Cause(err) == ErrIndexFormat {
 		idx, _, err := LoadIndexWithDecoder(ctx, repo, nil, id, DecodeOldIndex)
 		return idx, err
 	}
