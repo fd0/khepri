@@ -5,6 +5,7 @@ import (
 	"math/rand"
 	"testing"
 
+	"github.com/restic/restic/internal/errors"
 	"github.com/restic/restic/internal/repository"
 	"github.com/restic/restic/internal/restic"
 	rtest "github.com/restic/restic/internal/test"
@@ -339,7 +340,10 @@ func BenchmarkDecodeIndex(b *testing.B) {
 }
 
 func TestIndexUnserializeOld(t *testing.T) {
-	idx, err := repository.DecodeOldIndex(docOldExample)
+	idx, err := repository.DecodeIndex(docOldExample)
+	rtest.Equals(t, repository.ErrIndexFormat, errors.Cause(err))
+
+	idx, err = repository.DecodeOldIndex(docOldExample)
 	rtest.OK(t, err)
 
 	for _, test := range exampleTests {
