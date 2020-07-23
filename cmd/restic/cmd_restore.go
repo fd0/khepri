@@ -2,6 +2,7 @@ package main
 
 import (
 	"strings"
+	"time"
 
 	"github.com/restic/restic/internal/debug"
 	"github.com/restic/restic/internal/errors"
@@ -190,8 +191,10 @@ func runRestore(opts RestoreOptions, gopts GlobalOptions, args []string) error {
 	if err == nil && opts.Verify {
 		Verbosef("verifying files in %s\n", opts.Target)
 		var count int
+		t0 := time.Now()
 		count, err = res.VerifyFiles(ctx, opts.Target)
-		Verbosef("finished verifying %d files in %s\n", count, opts.Target)
+		Verbosef("finished verifying %d files in %s (took %s)\n",
+			count, opts.Target, time.Since(t0).Round(time.Millisecond))
 	}
 	if totalErrors > 0 {
 		Printf("There were %d errors\n", totalErrors)

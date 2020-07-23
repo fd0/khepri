@@ -362,6 +362,11 @@ func TestRestorer(t *testing.T) {
 				t.Fatal(err)
 			}
 
+			if len(test.ErrorsMust)+len(test.ErrorsMay) == 0 {
+				_, err = res.VerifyFiles(ctx, tempdir)
+				rtest.OK(t, err)
+			}
+
 			for location, expectedErrors := range test.ErrorsMust {
 				actualErrors, ok := errors[location]
 				if !ok {
@@ -460,6 +465,9 @@ func TestRestorerRelative(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			nverified, err := res.VerifyFiles(ctx, "restore")
+			rtest.OK(t, err)
+			rtest.Equals(t, len(test.Files), nverified)
 
 			for filename, err := range errors {
 				t.Errorf("unexpected error for %v found: %v", filename, err)
@@ -688,4 +696,42 @@ func TestRestorerTraverseTree(t *testing.T) {
 			}
 		})
 	}
+}
+
+// VerifyFiles must not report cancelation of its context through res.Error.
+func TestVerifyCancel(t *testing.T) {
+	snapshot := Snapshot{
+		Nodes: map[string]Node{
+			"foo": File{Data: "content: foo\n"},
+		},
+	}
+
+	repo, cleanup := repository.TestRepository(t)
+	defer cleanup()
+
+	_, id := saveSnapshot(t, repo, snapshot)
+
+	res, err := NewRestorer(repo, id)
+	rtest.OK(t, err)
+
+	tempdir, cleanup := rtest.TempDir(t)
+	defer cleanup()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	rtest.OK(t, res.RestoreTo(ctx, tempdir))
+	err = ioutil.WriteFile(filepath.Join(tempdir, "foo"), []byte("bar"), 0644)
+	rtest.OK(t, err)
+
+	var errs []error
+	res.Error = func(filename string, err error) error {
+		errs = append(errs, err)
+		return err
+	}
+
+	nverified, err := res.VerifyFiles(ctx, tempdir)
+	rtest.Equals(t, 0, nverified)
+	rtest.Assert(t, err != nil, "nil error from VerifyFiles")
+	rtest.Equals(t, []error(nil), errs)
 }

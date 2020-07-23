@@ -4,13 +4,15 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 
 	"github.com/restic/restic/internal/crypto"
-	"github.com/restic/restic/internal/errors"
-
 	"github.com/restic/restic/internal/debug"
+	"github.com/restic/restic/internal/errors"
 	"github.com/restic/restic/internal/fs"
 	"github.com/restic/restic/internal/restic"
+
+	"golang.org/x/sync/errgroup"
 )
 
 // Restorer is used to restore a snapshot to a directory.
@@ -94,10 +96,13 @@ func (res *Restorer) traverseTree(ctx context.Context, target, location string, 
 		debug.Log("SelectFilter returned %v %v", selectedForRestore, childMayBeSelected)
 
 		sanitizeError := func(err error) error {
-			if err != nil {
-				err = res.Error(nodeLocation, err)
+			switch err {
+			case nil, context.Canceled, context.DeadlineExceeded:
+				// Context errors are permanent.
+				return err
+			default:
+				return res.Error(nodeLocation, err)
 			}
-			return err
 		}
 
 		if node.Type == "dir" {
@@ -105,7 +110,7 @@ func (res *Restorer) traverseTree(ctx context.Context, target, location string, 
 				return errors.Errorf("Dir without subtree in tree %v", treeID.Str())
 			}
 
-			if selectedForRestore {
+			if selectedForRestore && visitor.enterDir != nil {
 				err = sanitizeError(visitor.enterDir(node, nodeTarget, nodeLocation))
 				if err != nil {
 					return err
@@ -119,7 +124,7 @@ func (res *Restorer) traverseTree(ctx context.Context, target, location string, 
 				}
 			}
 
-			if selectedForRestore {
+			if selectedForRestore && visitor.leaveDir != nil {
 				err = sanitizeError(visitor.leaveDir(node, nodeTarget, nodeLocation))
 				if err != nil {
 					return err
@@ -199,13 +204,7 @@ func (res *Restorer) RestoreTo(ctx context.Context, dst string) error {
 		}
 	}
 
-	restoreNodeMetadata := func(node *restic.Node, target, location string) error {
-		return res.restoreNodeMetadataTo(node, target, location)
-	}
-	noop := func(node *restic.Node, target, location string) error { return nil }
-
 	idx := restic.NewHardlinkIndex()
-
 	filerestorer := newFileRestorer(dst, res.repo.Backend().Load, res.repo.Key(), res.repo.Index().Lookup)
 
 	// first tree pass: create directories and collect all files to restore
@@ -243,7 +242,6 @@ func (res *Restorer) RestoreTo(ctx context.Context, dst string) error {
 
 			return nil
 		},
-		leaveDir: noop,
 	})
 	if err != nil {
 		return err
@@ -256,7 +254,6 @@ func (res *Restorer) RestoreTo(ctx context.Context, dst string) error {
 
 	// second tree pass: restore special files and filesystem metadata
 	return res.traverseTree(ctx, dst, string(filepath.Separator), *res.sn.Tree, treeVisitor{
-		enterDir: noop,
 		visitNode: func(node *restic.Node, target, location string) error {
 			if node.Type != "file" {
 				return res.restoreNodeTo(ctx, node, target, location)
@@ -276,7 +273,7 @@ func (res *Restorer) RestoreTo(ctx context.Context, dst string) error {
 
 			return res.restoreNodeMetadataTo(node, target, location)
 		},
-		leaveDir: restoreNodeMetadata,
+		leaveDir: res.restoreNodeMetadataTo,
 	})
 }
 
@@ -285,58 +282,107 @@ func (res *Restorer) Snapshot() *restic.Snapshot {
 	return res.sn
 }
 
-// VerifyFiles reads all snapshot files and verifies their contents
+// Number of workers in VerifyFiles.
+const nVerifyWorkers = 8
+
+// VerifyFiles checks whether all regular files in the snapshot res.sn
+// have been successfully written to dst. It stops when it encounters an
+// error. It returns that error and the number of files it has successfully
+// verified.
 func (res *Restorer) VerifyFiles(ctx context.Context, dst string) (int, error) {
-	// TODO multithreaded?
+	type mustCheck struct {
+		node *restic.Node
+		path string
+	}
 
-	count := 0
-	err := res.traverseTree(ctx, dst, string(filepath.Separator), *res.sn.Tree, treeVisitor{
-		enterDir: func(node *restic.Node, target, location string) error { return nil },
-		visitNode: func(node *restic.Node, target, location string) error {
-			if node.Type != "file" {
-				return nil
-			}
+	var (
+		nchecked uint64
+		work     = make(chan mustCheck, 2*nVerifyWorkers)
+	)
 
-			count++
-			stat, err := os.Stat(target)
-			if err != nil {
-				return err
-			}
-			if int64(node.Size) != stat.Size() {
-				return errors.Errorf("Invalid file size: expected %d got %d", node.Size, stat.Size())
-			}
+	g, ctx := errgroup.WithContext(ctx)
 
-			file, err := os.Open(target)
-			if err != nil {
-				return err
-			}
+	// Traverse tree and send jobs to work.
+	g.Go(func() error {
+		defer close(work)
 
-			offset := int64(0)
-			for _, blobID := range node.Content {
-				blobs, _ := res.repo.Index().Lookup(blobID, restic.DataBlob)
-				length := blobs[0].Length - uint(crypto.Extension)
-				buf := make([]byte, length) // TODO do I want to reuse the buffer somehow?
-				_, err = file.ReadAt(buf, offset)
-				if err != nil {
-					_ = file.Close()
-					return err
+		return res.traverseTree(ctx, dst, string(filepath.Separator), *res.sn.Tree, treeVisitor{
+			visitNode: func(node *restic.Node, target, _ string) error {
+				if node.Type != "file" {
+					return nil
 				}
-				if !blobID.Equal(restic.Hash(buf)) {
-					_ = file.Close()
-					return errors.Errorf("Unexpected contents starting at offset %d", offset)
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				case work <- mustCheck{node, target}:
+					return nil
 				}
-				offset += int64(length)
-			}
-
-			err = file.Close()
-			if err != nil {
-				return err
-			}
-
-			return nil
-		},
-		leaveDir: func(node *restic.Node, target, location string) error { return nil },
+			},
+		})
 	})
 
-	return count, err
+	for i := 0; i < nVerifyWorkers; i++ {
+		g.Go(func() (err error) {
+			var buf []byte
+			for job := range work {
+				buf, err = res.verifyFile(job.path, job.node, buf)
+				if err != nil {
+					break
+				}
+				atomic.AddUint64(&nchecked, 1)
+			}
+			return err
+		})
+	}
+
+	return int(nchecked), g.Wait()
+}
+
+// Verify that the file target has the contents of node.
+//
+// buf and the first return value are scratch space, passed around for reuse.
+// Reusing buffers prevents the verifier goroutines allocating all of RAM and
+// flushing the filesystem cache (at least on Linux).
+func (res *Restorer) verifyFile(target string, node *restic.Node, buf []byte) ([]byte, error) {
+	f, err := os.Open(target)
+	if err != nil {
+		return buf, err
+	}
+	defer f.Close()
+
+	fi, err := f.Stat()
+	switch {
+	case err != nil:
+		return buf, err
+	case int64(node.Size) != fi.Size():
+		return buf, errors.Errorf("Invalid file size for %s: expected %d, got %d",
+			target, node.Size, fi.Size())
+	}
+
+	var offset int64
+	for _, blobID := range node.Content {
+		blobs, _ := res.repo.Index().Lookup(blobID, restic.DataBlob)
+		if len(blobs) == 0 {
+			return buf, errors.Errorf("Unable to fetch blob %s", blobID)
+		}
+
+		length := blobs[0].Length - uint(crypto.Extension)
+		if length > uint(cap(buf)) {
+			buf = make([]byte, 2*length)
+		}
+		buf = buf[:length]
+
+		_, err = f.ReadAt(buf, offset)
+		if err != nil {
+			return buf, err
+		}
+		if !blobID.Equal(restic.Hash(buf)) {
+			return buf, errors.Errorf(
+				"Unexpected content in %s, starting at offset %d",
+				target, offset)
+		}
+		offset += int64(length)
+	}
+
+	return buf, nil
 }
