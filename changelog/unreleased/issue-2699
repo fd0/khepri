@@ -1,0 +1,7 @@
+Bugfix: Restore symbolic links on windows
+
+We've added support to restore symbolic links on windows.
+Because of windows specific restrictions this is only possible when running
+restic with admin privileges.
+
+https://github.com/restic/restic/issues/2699
