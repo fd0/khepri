@@ -2,6 +2,7 @@
 
 package restic
 
-// IsRunningAsAdminOnWindows is true if the process is running with admin
-// privileges
-const IsRunningAsAdminOnWindows = false
+// isWindowsAdmin is true if the process is running with admin privileges
+func isWindowsAdmin() (bool, error) {
+	return false, nil
+}

@@ -303,12 +303,18 @@ func (node Node) createSymlinkAt(path string) error {
 
 	// Windows does not allow non-admins to create soft links.
 	if runtime.GOOS == "windows" {
-		if !IsRunningAsAdminOnWindows {
-			debug.Log(
+		isAdmin, err := isWindowsAdmin()
+
+		if err != nil {
+			debug.Log("failed to check if user has admin privileges: %v", err)
+			return err
+		}
+
+		if !isAdmin {
+			return errors.Errorf(
 				"can't restore symlink to %v without admin privileges on windows",
 				path,
 			)
-			return nil
 		}
 
 		// fix path so a restore to a different location will produce
