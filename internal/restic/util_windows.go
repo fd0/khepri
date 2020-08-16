@@ -17,9 +17,6 @@ var windowsAdmin struct {
 func isWindowsAdmin() (bool, error) {
 	windowsAdmin.Do(func() {
 
-		windowsAdmin.isAdmin = false
-		windowsAdmin.err = nil
-
 		var sid *windows.SID
 
 		err := windows.AllocateAndInitializeSid(
@@ -40,7 +37,7 @@ func isWindowsAdmin() (bool, error) {
 		defer windows.FreeSid(sid)
 
 		token := windows.Token(0)
-		isMemberOfAdminGroup, err := token.IsMember(sid)
+		windowsAdmin.isAdmin, err = token.IsMember(sid)
 
 		if err != nil {
 			debug.Log("token.IsMember() failed: %s", err)
@@ -48,9 +45,7 @@ func isWindowsAdmin() (bool, error) {
 			return
 		}
 
-		debug.Log("isRunningAsAdmin(): %v", isMemberOfAdminGroup)
-
-		windowsAdmin.isAdmin = isMemberOfAdminGroup
+		debug.Log("isWindowsAdmin(): %v", windowsAdmin.isAdmin)
 	})
 
 	return windowsAdmin.isAdmin, windowsAdmin.err
