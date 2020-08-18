@@ -301,18 +301,21 @@ func (node Node) createSymlinkAt(path string) error {
 
 	linkTarget := node.LinkTarget
 
-	// Windows does not allow non-admins to create soft links.
+	// Windows does not allow processes withouth SeCreateSymbolicLinkPrivilege
+	// to create symbolic links (on most systems this are all non-admin users).
 	if runtime.GOOS == "windows" {
-		isAdmin, err := isWindowsAdmin()
+		isAllowedToSymlink, err := isAllowedToSymlink()
 
 		if err != nil {
 			debug.Log("failed to check if user has admin privileges: %v", err)
 			return err
 		}
 
-		if !isAdmin {
+		if !isAllowedToSymlink {
 			return errors.Errorf(
-				"can't restore symlink to %v without admin privileges on windows",
+				"can't restore symlink to %v without "+
+					"SeCreateSymbolicLinkPrivilege privileges on windows. "+
+					"current user either needs privileges or run as admin.",
 				path,
 			)
 		}

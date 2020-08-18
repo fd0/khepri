@@ -2,7 +2,8 @@
 
 package restic
 
-// isWindowsAdmin is true if the process is running with admin privileges
-func isWindowsAdmin() (bool, error) {
+// isAllowedToSymlink is true if the process is allowed to create symlinks on
+// windows
+func isAllowedToSymlink() (bool, error) {
 	return false, nil
 }
