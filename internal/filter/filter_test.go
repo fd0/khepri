@@ -240,34 +240,53 @@ func ExampleMatch_wildcards() {
 }
 
 var filterListTests = []struct {
-	patterns []string
-	path     string
-	match    bool
+	patterns      []string
+	path          string
+	match         bool
+	childMayMatch bool
 }{
-	{[]string{"*.go"}, "/foo/bar/test.go", true},
-	{[]string{"*.c"}, "/foo/bar/test.go", false},
-	{[]string{"*.go", "*.c"}, "/foo/bar/test.go", true},
-	{[]string{"*"}, "/foo/bar/test.go", true},
-	{[]string{"x"}, "/foo/bar/test.go", false},
-	{[]string{"?"}, "/foo/bar/test.go", false},
-	{[]string{"?", "x"}, "/foo/bar/x", true},
-	{[]string{"/*/*/bar/test.*"}, "/foo/bar/test.go", false},
-	{[]string{"/*/*/bar/test.*", "*.go"}, "/foo/bar/test.go", true},
-	{[]string{"", "*.c"}, "/foo/bar/test.go", false},
+	{[]string{"*.go"}, "/foo/bar/test.go", true, true},
+	{[]string{"*.go"}, "/foo/bar", false, true},
+	{[]string{"*.c"}, "/foo/bar/test.go", false, true},
+	{[]string{"*.go", "*.c"}, "/foo/bar/test.go", true, true},
+	{[]string{"*"}, "/foo/bar/test.go", true, true},
+	{[]string{"x"}, "/foo/bar/test.go", false, true},
+	{[]string{"?"}, "/foo/bar/test.go", false, true},
+	{[]string{"?", "x"}, "/foo/bar/x", true, true},
+	{[]string{"/*/*/bar/test.*"}, "/foo/bar/test.go", false, false},
+	{[]string{"/*/*/bar/test.*"}, "/foo/bar/bar", false, true},
+	{[]string{"/*/*/bar/test.*", "*.go"}, "/foo/bar/test.go", true, true},
+	{[]string{"", "*.c"}, "/foo/bar/test.go", false, true},
+	{[]string{"!**", "*.go"}, "/foo/bar/test.go", true, true},
+	{[]string{"!**", "*.c"}, "/foo/bar/test.go", false, true},
+	{[]string{"/foo/*/test.*", "!*.c"}, "/foo/bar/test.c", false, false},
+	{[]string{"/foo/*/test.*", "!*.c"}, "/foo/bar/test.go", true, true},
+	{[]string{"/foo/*/*", "!test.*", "*.c"}, "/foo/bar/test.go", false, true},
+	{[]string{"/foo/*/*", "!test.*", "*.c"}, "/foo/bar/test.c", true, true},
+	{[]string{"/foo/*/*", "!test.*", "*.c"}, "/foo/bar/file.go", true, true},
+	{[]string{"/**/*", "!/foo", "/foo/*", "!/foo/bar"}, "/foo/other/test.go", true, true},
+	{[]string{"/**/*", "!/foo", "/foo/*", "!/foo/bar"}, "/foo/bar", false, false},
+	{[]string{"/**/*", "!/foo", "/foo/*", "!/foo/bar"}, "/foo/bar/test.go", false, false},
+	{[]string{"/**/*", "!/foo", "/foo/*", "!/foo/bar"}, "/foo/bar/test.go/child", false, false},
+	{[]string{"/**/*", "!/foo", "/foo/*", "!/foo/bar", "/foo/bar/test*"}, "/foo/bar/test.go/child", true, true},
+	{[]string{"/foo/bar/*"}, "/foo", false, true},
+	{[]string{"/foo/bar/*", "!/foo/bar/[a-m]*"}, "/foo", false, true},
+	{[]string{"/foo/**/test.c"}, "/foo/bar/foo/bar/test.c", true, true},
+	{[]string{"/foo/*/test.c"}, "/foo/bar/foo/bar/test.c", false, false},
 }
 
 func TestList(t *testing.T) {
 	for i, test := range filterListTests {
-		match, _, err := filter.List(test.patterns, test.path)
+		match, childMayMatch, err := filter.List(test.patterns, test.path)
 		if err != nil {
 			t.Errorf("test %d failed: expected no error for patterns %q, but error returned: %v",
 				i, test.patterns, err)
 			continue
 		}
 
-		if match != test.match {
-			t.Errorf("test %d: filter.MatchList(%q, %q): expected %v, got %v",
-				i, test.patterns, test.path, test.match, match)
+		if match != test.match || childMayMatch != test.childMayMatch {
+			t.Errorf("test %d: filter.MatchList(%q, %q): expected %v|childMayMatch:%v, got %v|childMayMatch:%v",
+				i, test.patterns, test.path, test.match, test.childMayMatch, match, childMayMatch)
 		}
 	}
 }
