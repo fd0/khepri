@@ -224,9 +224,23 @@ func Println(args ...interface{}) {
 	}
 }
 
+// PrintDef calls Printf to write the message when no special verbosity level is required.
+func PrintDef(format string, args ...interface{}) {
+	if globalOptions.verbosity >= 1 {
+		Printf(format, args...)
+	}
+}
+
 // Verbosef calls Printf to write the message when the verbose flag is set.
 func Verbosef(format string, args ...interface{}) {
-	if globalOptions.verbosity >= 1 {
+	if globalOptions.verbosity >= 2 {
+		Printf(format, args...)
+	}
+}
+
+// Verboseff calls Printf to write the message when the verbose=2 flag is set.
+func Verboseff(format string, args ...interface{}) {
+	if globalOptions.verbosity >= 3 {
 		Printf(format, args...)
 	}
 }
@@ -349,7 +363,7 @@ func ReadPassword(opts GlobalOptions, prompt string) (string, error) {
 		password, err = readPasswordTerminal(os.Stdin, os.Stderr, prompt)
 	} else {
 		password, err = readPassword(os.Stdin)
-		Verbosef("reading repository password from stdin\n")
+		PrintDef("reading repository password from stdin\n")
 	}
 
 	if err != nil {
@@ -465,14 +479,12 @@ func OpenRepository(opts GlobalOptions) (*repository.Repository, error) {
 		return nil, errors.Fatalf("%s", err)
 	}
 
-	if stdoutIsTerminal() && !opts.JSON {
+	if stdoutIsTerminal() {
 		id := s.Config().ID
 		if len(id) > 8 {
 			id = id[:8]
 		}
-		if !opts.JSON {
-			Verbosef("repository %v opened successfully, password is correct\n", id)
-		}
+		PrintDef("repository %v opened successfully, password is correct\n", id)
 	}
 
 	if opts.NoCache {
@@ -485,8 +497,8 @@ func OpenRepository(opts GlobalOptions) (*repository.Repository, error) {
 		return s, nil
 	}
 
-	if c.Created && !opts.JSON {
-		Verbosef("created new cache in %v\n", c.Base)
+	if c.Created {
+		PrintDef("created new cache in %v\n", c.Base)
 	}
 
 	// start using the cache
@@ -504,7 +516,7 @@ func OpenRepository(opts GlobalOptions) (*repository.Repository, error) {
 
 	// cleanup old cache dirs if instructed to do so
 	if opts.CleanupCache {
-		Printf("removing %d old cache dirs from %v\n", len(oldCacheDirs), c.Base)
+		PrintDef("removing %d old cache dirs from %v\n", len(oldCacheDirs), c.Base)
 
 		for _, item := range oldCacheDirs {
 			dir := filepath.Join(c.Base, item.Name())
@@ -515,7 +527,7 @@ func OpenRepository(opts GlobalOptions) (*repository.Repository, error) {
 		}
 	} else {
 		if stdoutIsTerminal() {
-			Verbosef("found %d old cache directories in %v, run `restic cache --cleanup` to remove them\n",
+			PrintDef("found %d old cache directories in %v, run `restic cache --cleanup` to remove them\n",
 				len(oldCacheDirs), c.Base)
 		}
 	}

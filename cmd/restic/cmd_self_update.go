@@ -71,15 +71,15 @@ func runSelfUpdate(opts SelfUpdateOptions, gopts GlobalOptions, args []string) e
 		}
 	}
 
-	Printf("writing restic to %v\n", opts.Output)
+	PrintDef("writing restic to %v\n", opts.Output)
 
-	v, err := selfupdate.DownloadLatestStableRelease(gopts.ctx, opts.Output, version, Verbosef)
+	v, err := selfupdate.DownloadLatestStableRelease(gopts.ctx, opts.Output, version, PrintDef)
 	if err != nil {
 		return errors.Fatalf("unable to update restic: %v", err)
 	}
 
 	if v != version {
-		Printf("successfully updated restic to version %v\n", v)
+		PrintDef("successfully updated restic to version %v\n", v)
 	}
 
 	return nil

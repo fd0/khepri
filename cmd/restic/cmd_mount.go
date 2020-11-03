@@ -116,7 +116,7 @@ func runMount(opts MountOptions, gopts GlobalOptions, args []string) error {
 	mountpoint := args[0]
 
 	if _, err := resticfs.Stat(mountpoint); os.IsNotExist(errors.Cause(err)) {
-		Verbosef("Mountpoint %s doesn't exist, creating it\n", mountpoint)
+		PrintDef("Mountpoint %s doesn't exist, creating it\n", mountpoint)
 		err = resticfs.Mkdir(mountpoint, os.ModeDir|0700)
 		if err != nil {
 			return err
@@ -163,8 +163,8 @@ func runMount(opts MountOptions, gopts GlobalOptions, args []string) error {
 	}
 	root := fuse.NewRoot(repo, cfg)
 
-	Printf("Now serving the repository at %s\n", mountpoint)
-	Printf("When finished, quit with Ctrl-c or umount the mountpoint.\n")
+	PrintDef("Now serving the repository at %s\n", mountpoint)
+	PrintDef("When finished, quit with Ctrl-c or umount the mountpoint.\n")
 
 	debug.Log("serving mount at %v", mountpoint)
 	err = fs.Serve(c, root)

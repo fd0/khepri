@@ -48,9 +48,7 @@ func deleteFiles(gopts GlobalOptions, ignoreError bool, repo restic.Repository, 
 						return err
 					}
 				}
-				if !gopts.JSON && gopts.verbosity > 2 {
-					Verbosef("removed %v\n", h)
-				}
+				Verboseff("removed %v\n", h)
 				bar.Report(restic.Stat{Blobs: 1})
 			}
 			return nil
