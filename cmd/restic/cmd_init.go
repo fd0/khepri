@@ -126,7 +126,10 @@ func runInit(opts InitOptions, gopts GlobalOptions, args []string) error {
 
 func toJSONString(status interface{}) string {
 	buf := new(bytes.Buffer)
-	json.NewEncoder(buf).Encode(status)
+	err := json.NewEncoder(buf).Encode(status)
+	if err != nil {
+		Warnf("Could not encode JSON string")
+	}
 	return buf.String()
 }
 
