@@ -46,12 +46,6 @@ func init() {
 }
 
 func runInit(opts InitOptions, gopts GlobalOptions, args []string) error {
-	type JSONError struct {
-		Status     string `json:"status"`
-		Repository string `json:"status"`
-		Message    string `json:"message"`
-	}
-
 	type JSONSuccess struct {
 		Status     string `json:"status"`
 		ID         string `json:"id"`
@@ -69,16 +63,7 @@ func runInit(opts InitOptions, gopts GlobalOptions, args []string) error {
 
 	be, err := create(repo, gopts.extended)
 	if err != nil {
-		if !gopts.JSON {
-			return errors.Fatalf("create repository at %s failed: %v\n", location.StripPassword(gopts.Repo), err)
-		} else {
-			status := JSONError{
-				Status:     "error_repository",
-				Repository: location.StripPassword(gopts.Repo),
-				Message:    err.Error(),
-			}
-			return errors.Fatal(toJSONString(status))
-		}
+		return errors.Fatalf("create repository at %s failed: %v\n", location.StripPassword(gopts.Repo), err)
 	}
 
 	gopts.password, err = ReadPasswordTwice(gopts,
@@ -92,16 +77,7 @@ func runInit(opts InitOptions, gopts GlobalOptions, args []string) error {
 
 	err = s.Init(gopts.ctx, gopts.password, chunkerPolynomial)
 	if err != nil {
-		if !gopts.JSON {
-			return errors.Fatalf("create key in repository at %s failed: %v\n", location.StripPassword(gopts.Repo), err)
-		} else {
-			status := JSONError{
-				Status:     "error_key",
-				Repository: location.StripPassword(gopts.Repo),
-				Message:    err.Error(),
-			}
-			return errors.Fatal(toJSONString(status))
-		}
+		return errors.Fatalf("create key in repository at %s failed: %v\n", location.StripPassword(gopts.Repo), err)
 	}
 
 	if !gopts.JSON {
