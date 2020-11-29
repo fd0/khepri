@@ -46,6 +46,17 @@ func init() {
 }
 
 func runInit(opts InitOptions, gopts GlobalOptions, args []string) error {
+	type JSONError struct {
+		Status     string `json:"status"`
+		Repository string `json:"status"`
+		Message    string `json:"message"`
+	}
+
+	type JSONSuccess struct {
+		Status     string `json:"status"`
+		ID         string `json:"id"`
+		Repository string `json:"repository"`
+	}
 	chunkerPolynomial, err := maybeReadChunkerPolynomial(opts, gopts)
 	if err != nil {
 		return err
@@ -61,16 +72,12 @@ func runInit(opts InitOptions, gopts GlobalOptions, args []string) error {
 		if !gopts.JSON {
 			return errors.Fatalf("create repository at %s failed: %v\n", location.StripPassword(gopts.Repo), err)
 		} else {
-			status := struct {
-				Status     string `json:"status"`
-				Repository string `json:"repository"`
-				Message    string `json:"message"`
-			}{
+			status := JSONError{
 				Status:     "error_repository",
 				Repository: location.StripPassword(gopts.Repo),
 				Message:    err.Error(),
 			}
-			return errors.Fatalf(toJSONString(status))
+			return errors.Fatal(toJSONString(status))
 		}
 	}
 
@@ -88,16 +95,12 @@ func runInit(opts InitOptions, gopts GlobalOptions, args []string) error {
 		if !gopts.JSON {
 			return errors.Fatalf("create key in repository at %s failed: %v\n", location.StripPassword(gopts.Repo), err)
 		} else {
-			status := struct {
-				Status     string `json:"status"`
-				Repository string `json:"repository"`
-				Message    string `json:"message"`
-			}{
+			status := JSONError{
 				Status:     "error_key",
 				Repository: location.StripPassword(gopts.Repo),
 				Message:    err.Error(),
 			}
-			return errors.Fatalf(toJSONString(status))
+			return errors.Fatal(toJSONString(status))
 		}
 	}
 
@@ -109,13 +112,9 @@ func runInit(opts InitOptions, gopts GlobalOptions, args []string) error {
 		Verbosef("irrecoverably lost.\n")
 
 	} else {
-		status := struct {
-			Status     string `json:"status"`
-			Id         string `json:"id"`
-			Repository string `json:"repository"`
-		}{
+		status := JSONSuccess{
 			Status:     "success",
-			Id:         s.Config().ID[:10],
+			ID:         s.Config().ID,
 			Repository: location.StripPassword(gopts.Repo),
 		}
 		Verbosef(toJSONString(status))
@@ -128,7 +127,7 @@ func toJSONString(status interface{}) string {
 	buf := new(bytes.Buffer)
 	err := json.NewEncoder(buf).Encode(status)
 	if err != nil {
-		Warnf("Could not encode JSON string")
+		panic("ERROR: Could not encode JSON string")
 	}
 	return buf.String()
 }
