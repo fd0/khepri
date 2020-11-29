@@ -4,3 +4,4 @@ Init command did not listen to the --json flag, it now outputs a struct dependin
 
 
 https://github.com/restic/restic/issues/3124
+https://github.com/restic/restic/pull/3132
