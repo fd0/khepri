@@ -374,10 +374,11 @@ func removePacksExcept(gopts GlobalOptions, t *testing.T, keep restic.IDSet, rem
 
 	// Get all tree packs
 	rtest.OK(t, r.LoadIndex(gopts.ctx))
+
 	treePacks := restic.NewIDSet()
-	for _, idx := range r.Index().(*repository.MasterIndex).All() {
-		for _, id := range idx.TreePacks() {
-			treePacks.Insert(id)
+	for pb := range r.Index().Each(context.TODO()) {
+		if pb.Type == restic.TreeBlob {
+			treePacks.Insert(pb.PackID)
 		}
 	}
 
@@ -436,11 +437,10 @@ func TestBackupTreeLoadError(t *testing.T) {
 	r, err := OpenRepository(env.gopts)
 	rtest.OK(t, err)
 	rtest.OK(t, r.LoadIndex(env.gopts.ctx))
-	// collect tree packs of subdirectory
-	subTreePacks := restic.NewIDSet()
-	for _, idx := range r.Index().(*repository.MasterIndex).All() {
-		for _, id := range idx.TreePacks() {
-			subTreePacks.Insert(id)
+	treePacks := restic.NewIDSet()
+	for pb := range r.Index().Each(context.TODO()) {
+		if pb.Type == restic.TreeBlob {
+			treePacks.Insert(pb.PackID)
 		}
 	}
 
@@ -448,7 +448,7 @@ func TestBackupTreeLoadError(t *testing.T) {
 	testRunCheck(t, env.gopts)
 
 	// delete the subdirectory pack first
-	for id := range subTreePacks {
+	for id := range treePacks {
 		rtest.OK(t, r.Backend().Remove(env.gopts.ctx, restic.Handle{Type: restic.PackFile, Name: id.String()}))
 	}
 	testRunRebuildIndex(t, env.gopts)
@@ -1643,6 +1643,50 @@ func TestListOnce(t *testing.T) {
 
 	rtest.OK(t, runRebuildIndex(RebuildIndexOptions{}, env.gopts))
 	rtest.OK(t, runRebuildIndex(RebuildIndexOptions{ReadAllPacks: true}, env.gopts))
+}
+
+type noReadBackend struct {
+	restic.Backend
+}
+
+// called via repo.Backend().Load()
+func (b noReadBackend) Load(ctx context.Context, h restic.Handle, length int, offset int64, fn func(rd io.Reader) error) error {
+	return errors.Errorf("Failed to load %v", h)
+}
+
+func TestHotRepo(t *testing.T) {
+	env, cleanup := withTestEnvironment(t)
+	defer cleanup()
+
+	env.gopts.backendTestHook = func(r restic.Backend) (restic.Backend, error) {
+		return noReadBackend{r}, nil
+	}
+
+	// use mountpoint as dir for hot repo
+	env.gopts.RepoHot = env.mountpoint
+	pruneOpts := PruneOptions{MaxUnused: "5%", RepackCachableOnly: true}
+	checkOpts := CheckOptions{ReadData: false, CheckUnused: false}
+
+	testSetupBackupData(t, env)
+	opts := BackupOptions{}
+
+	testRunBackup(t, "", []string{filepath.Join(env.testdata, "0", "0", "9")}, opts, env.gopts)
+	firstSnapshot := testRunList(t, "snapshots", env.gopts)
+	testRunBackup(t, "", []string{filepath.Join(env.testdata, "0", "0", "9", "2")}, opts, env.gopts)
+	// backup with parent
+	testRunBackup(t, "", []string{filepath.Join(env.testdata, "0", "0", "9", "2")}, opts, env.gopts)
+	rtest.OK(t, runCheck(checkOpts, env.gopts, nil))
+
+	// run forget and prune
+	testRunForgetJSON(t, env.gopts)
+	testRunForget(t, env.gopts, firstSnapshot[0].String())
+	testRunPrune(t, env.gopts, pruneOpts)
+	rtest.OK(t, runCheck(checkOpts, env.gopts, nil))
+
+	// run check --read-data on full repo
+	env.gopts.backendTestHook = nil
+	checkOpts = CheckOptions{ReadData: true, CheckUnused: false}
+	rtest.OK(t, runCheck(checkOpts, env.gopts, nil))
 }
 
 func TestHardLink(t *testing.T) {

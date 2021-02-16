@@ -174,7 +174,11 @@ func (r *Repository) LoadBlob(ctx context.Context, t restic.BlobType, id restic.
 		}
 
 		// load blob from pack
-		h := restic.Handle{Type: restic.PackFile, Name: blob.PackID.String()}
+		bt := t
+		if r.idx.IsMixedPack(blob.PackID) {
+			bt = restic.InvalidBlob
+		}
+		h := restic.Handle{Type: restic.PackFile, Name: blob.PackID.String(), BT: bt}
 
 		switch {
 		case cap(buf) < int(blob.Length):
@@ -564,36 +568,6 @@ func (r *Repository) PrepareCache(indexIDs restic.IDSet) error {
 		fmt.Fprintf(os.Stderr, "error clearing pack files in cache: %v\n", err)
 	}
 
-	treePacks := restic.NewIDSet()
-	for _, idx := range r.idx.All() {
-		for _, id := range idx.TreePacks() {
-			treePacks.Insert(id)
-		}
-	}
-
-	// use readahead
-	debug.Log("using readahead")
-	cache := r.Cache
-	cache.PerformReadahead = func(h restic.Handle) bool {
-		if h.Type != restic.PackFile {
-			debug.Log("no readahead for %v, is not a pack file", h)
-			return false
-		}
-
-		id, err := restic.ParseID(h.Name)
-		if err != nil {
-			debug.Log("no readahead for %v, invalid ID", h)
-			return false
-		}
-
-		if treePacks.Has(id) {
-			debug.Log("perform readahead for %v", h)
-			return true
-		}
-		debug.Log("no readahead for %v, not tree file", h)
-		return false
-	}
-
 	return nil
 }
 
@@ -653,6 +627,15 @@ func (r *Repository) init(ctx context.Context, password string, cfg restic.Confi
 	r.cfg = cfg
 	_, err = r.SaveJSONUnpacked(ctx, restic.ConfigFile, cfg)
 	return err
+}
+
+// InitFrom initializes a repo using key and config from another repo.
+func (r *Repository) InitFrom(r2 *Repository) {
+	r.key = r2.key
+	r.dataPM.key = r2.key
+	r.treePM.key = r2.key
+	r.keyName = r2.keyName
+	r.cfg = r2.cfg
 }
 
 // Key returns the current master key.
