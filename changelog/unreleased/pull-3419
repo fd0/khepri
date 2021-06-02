@@ -1,0 +1,14 @@
+Enhancement: Enable admin to decide group access to repository files
+
+Access to all repository directories and files used to be restricted to the
+current user only, preventing various use cases where other users should be
+allowed to read the repo files.
+
+Now we create files with group access enabled but still blocked by
+directories remaining group inacessible by default. This allows admins to
+configure directory modes to decide if group access should be allowed going
+forward.
+
+https://github.com/restic/restic/issues/2351
+https://github.com/restic/restic/pull/3419
+https://forum.restic.net/t/change-permissions-on-repository-files/1391
