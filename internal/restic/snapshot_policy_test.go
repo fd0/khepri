@@ -228,6 +228,17 @@ func TestApplyPolicy(t *testing.T) {
 		{Within: parseDuration("13d23h")},
 		{Within: parseDuration("2m2h")},
 		{Within: parseDuration("1y2m3d3h")},
+		{HourlyWithin: parseDuration("1y2m3d3h")},
+		{DailyWithin: parseDuration("1y2m3d3h")},
+		{WeeklyWithin: parseDuration("1y2m3d3h")},
+		{MonthlyWithin: parseDuration("1y2m3d3h")},
+		{YearlyWithin: parseDuration("1y2m3d3h")},
+		{Within: parseDuration("1h"),
+			HourlyWithin:  parseDuration("1d"),
+			DailyWithin:   parseDuration("7d"),
+			WeeklyWithin:  parseDuration("1m"),
+			MonthlyWithin: parseDuration("1y"),
+			YearlyWithin:  parseDuration("9999y")},
 	}
 
 	for i, p := range tests {
