@@ -189,7 +189,19 @@ The ``forget`` command accepts the following parameters:
    the duration of the latest snapshot. ``duration`` needs to be a number of
    years, months, days, and hours, e.g. ``2y5m7d3h`` will keep all snapshots
    made in the two years, five months, seven days, and three hours before the
-   latest snapshot.
+   latest snapshot`
+-  ``--keep-hourly-within duration`` keep all hourly snapshots made within
+   specified duration of the latest snapshot. The duration is specified in 
+   the same way as for ``--keep-within`` and the method for determining
+   hourly snapshots is the same as for ``--keep-hourly``
+-  ``--keep-daily-within duration`` keep all daily snapshots made within
+   specified duration of the latest snapshot.
+-  ``--keep-weekly-within duration`` keep all weekly snapshots made within
+   specified duration of the latest snapshot.
+-  ``--keep-monthly-within duration`` keep all monthly snapshots made within
+   specified duration of the latest snapshot.
+-  ``--keep-yearly-within duration`` keep all yearly snapshots made within
+   specified duration of the latest snapshot.
 
 .. note:: All calendar related ``--keep-*`` options work on the natural time
     boundaries and not relative to when you run the ``forget`` command. Weeks
@@ -304,6 +316,16 @@ already include a week!) last-day-of-the-weeks and 11 or 12
 last-day-of-the-months (11 or 12 depends if the 5 weeklies cross a month).
 And finally 75 last-day-of-the-year snapshots. All other snapshots are
 removed.
+
+You might want to maintain the same policy as for the example above, but have
+irregular backups. For example, the 7 snapshots specified with ``--keep-daily 7`` 
+might be spread over a longer period. If what you want is to keep daily snapshots
+for a week, weekly for a month, monthly for a year and yearly for 75 years, you 
+could specify:
+``forget --keep-daily-within 7d --keep-weekly-within 1m --keep-monthly-within 1y
+--keep-yearly-within 75y``
+(Note that `1w` is not a recognized duration, so you will have to specify 
+`7d` instead)
 
 Customize pruning
 *****************
