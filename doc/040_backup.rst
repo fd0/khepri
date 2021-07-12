@@ -355,6 +355,11 @@ the list of files/patterns from there instead of a text file.
 In all cases, paths may be absolute or relative to ``restic backup``'s working
 directory.
 
+Note that if you use restic in combination with ``--files-from`` arguments, by default all
+entries from the files are added to the snapshot's "paths" field. This may break automatic
+finding of parent snapshots if the entries change between multiple runs of restic. Please consider setting the "paths" field manually
+using ``--set-path`` or ``--set-paths-from`` to reflect a consistent description of what is being backed up.
+
 For example, maybe you want to backup files which have a name that matches a
 certain regular expression pattern (uses GNU ``find``):
 
@@ -366,14 +371,17 @@ You can then use restic to backup the filtered files:
 
 .. code-block:: console
 
-    $ restic -r /srv/restic-repo backup --files-from-raw /tmp/files_to_backup
+    $ restic -r /srv/restic-repo backup --files-from-raw /tmp/files_to_backup --set-path /tmp/somefiles
 
 You can combine all three options with each other and with the normal file arguments:
 
 .. code-block:: console
 
-    $ restic backup --files-from /tmp/files_to_backup /tmp/some_additional_file
-    $ restic backup --files-from /tmp/glob-pattern --files-from-raw /tmp/generated-list /tmp/some_additional_file
+    $ restic backup --files-from /tmp/files_to_backup /tmp/some_additional_file \
+                    --set-path /tmp/somefiles --set-path /tmp/some_additional_file
+    $ restic backup --files-from /tmp/glob-pattern --files-from-raw /tmp/generated-list /tmp/some_additional_file \
+                    --set-path-from /tmp/glob-pattern --set-path /tmp/somefiles --set-path /tmp/some_additional_file
+
 
 Comparing Snapshots
 *******************
