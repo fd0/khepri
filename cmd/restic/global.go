@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -66,6 +67,7 @@ type GlobalOptions struct {
 
 	LimitUploadKb   int
 	LimitDownloadKb int
+	MinPackSize     uint
 
 	ctx      context.Context
 	password string
@@ -101,6 +103,13 @@ func init() {
 		return nil
 	})
 
+	minPackSize, err := strconv.Atoi(os.Getenv("RESTIC_MIN_PACKSIZE"))
+	if err != nil {
+		if os.Getenv("RESTIC_MIN_PACKSIZE") != "" {
+			Warnf("Failed to parse RESTIC_MIN_PACKSIZE, %v\n", err)
+		}
+	}
+
 	f := cmdRoot.PersistentFlags()
 	f.StringVarP(&globalOptions.Repo, "repo", "r", os.Getenv("RESTIC_REPOSITORY"), "`repository` to backup to or restore from (default: $RESTIC_REPOSITORY)")
 	f.StringVarP(&globalOptions.RepositoryFile, "repository-file", "", os.Getenv("RESTIC_REPOSITORY_FILE"), "`file` to read the repository location from (default: $RESTIC_REPOSITORY_FILE)")
@@ -118,11 +127,22 @@ func init() {
 	f.BoolVar(&globalOptions.CleanupCache, "cleanup-cache", false, "auto remove old cache directories")
 	f.IntVar(&globalOptions.LimitUploadKb, "limit-upload", 0, "limits uploads to a maximum rate in KiB/s. (default: unlimited)")
 	f.IntVar(&globalOptions.LimitDownloadKb, "limit-download", 0, "limits downloads to a maximum rate in KiB/s. (default: unlimited)")
+	f.UintVar(&globalOptions.MinPackSize, "min-packsize", unsignInt(minPackSize), "set min pack size in MiB. (default: $RESTIC_MIN_PACKSIZE or 4)")
 	f.StringSliceVarP(&globalOptions.Options, "option", "o", []string{}, "set extended option (`key=value`, can be specified multiple times)")
 	// Use our "generate" command instead of the cobra provided "completion" command
 	cmdRoot.CompletionOptions.DisableDefaultCmd = true
 
 	restoreTerminal()
+}
+
+// unsignInt is to avoid the 2s completement issue where you can get unintended
+// results when casting a negative int to uint.
+func unsignInt(i int) uint {
+	// ugly, nasty bounds check.
+	if i < 0 {
+		return 0
+	}
+	return uint(i)
 }
 
 // checkErrno returns nil when err is set to syscall.Errno(0), since this is no
@@ -452,6 +472,7 @@ func OpenRepository(opts GlobalOptions) (*repository.Repository, error) {
 	}
 
 	s := repository.New(be)
+	s.SetMinPackSize(opts.MinPackSize * 1024 * 1024)
 
 	passwordTriesLeft := 1
 	if stdinIsTerminal() && opts.password == "" {
