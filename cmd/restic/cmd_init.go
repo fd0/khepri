@@ -1,6 +1,9 @@
 package main
 
 import (
+	"bytes"
+	"encoding/json"
+
 	"github.com/restic/chunker"
 	"github.com/restic/restic/internal/backend/location"
 	"github.com/restic/restic/internal/errors"
@@ -43,6 +46,11 @@ func init() {
 }
 
 func runInit(opts InitOptions, gopts GlobalOptions, args []string) error {
+	type JSONSuccess struct {
+		Status     string `json:"status"`
+		ID         string `json:"id"`
+		Repository string `json:"repository"`
+	}
 	chunkerPolynomial, err := maybeReadChunkerPolynomial(opts, gopts)
 	if err != nil {
 		return err
@@ -72,13 +80,32 @@ func runInit(opts InitOptions, gopts GlobalOptions, args []string) error {
 		return errors.Fatalf("create key in repository at %s failed: %v\n", location.StripPassword(gopts.Repo), err)
 	}
 
-	Verbosef("created restic repository %v at %s\n", s.Config().ID[:10], location.StripPassword(gopts.Repo))
-	Verbosef("\n")
-	Verbosef("Please note that knowledge of your password is required to access\n")
-	Verbosef("the repository. Losing your password means that your data is\n")
-	Verbosef("irrecoverably lost.\n")
+	if !gopts.JSON {
+		Verbosef("created restic repository %v at %s\n", s.Config().ID[:10], location.StripPassword(gopts.Repo))
+		Verbosef("\n")
+		Verbosef("Please note that knowledge of your password is required to access\n")
+		Verbosef("the repository. Losing your password means that your data is\n")
+		Verbosef("irrecoverably lost.\n")
+
+	} else {
+		status := JSONSuccess{
+			Status:     "success",
+			ID:         s.Config().ID,
+			Repository: location.StripPassword(gopts.Repo),
+		}
+		Verbosef(toJSONString(status))
+	}
 
 	return nil
+}
+
+func toJSONString(status interface{}) string {
+	buf := new(bytes.Buffer)
+	err := json.NewEncoder(buf).Encode(status)
+	if err != nil {
+		panic("ERROR: Could not encode JSON string")
+	}
+	return buf.String()
 }
 
 func maybeReadChunkerPolynomial(opts InitOptions, gopts GlobalOptions) (*chunker.Pol, error) {
