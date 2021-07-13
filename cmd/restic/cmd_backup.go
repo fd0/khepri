@@ -70,7 +70,7 @@ Exit status is 3 if some source data could not be read (incomplete snapshot crea
 
 // BackupOptions bundles all options for the backup command.
 type BackupOptions struct {
-	Parent                  string
+	Parents                 []string
 	Force                   bool
 	Excludes                []string
 	InsensitiveExcludes     []string
@@ -103,7 +103,7 @@ func init() {
 	cmdRoot.AddCommand(cmdBackup)
 
 	f := cmdBackup.Flags()
-	f.StringVar(&backupOptions.Parent, "parent", "", "use this parent `snapshot` (default: last snapshot in the repo that has the same target files/directories)")
+	f.StringArrayVar(&backupOptions.Parents, "parent", nil, "use this parent `snapshot` (can be specified multiple times, default: suitable snapshot(s) selected by targets)")
 	f.BoolVarP(&backupOptions.Force, "force", "f", false, `force re-reading the target files/directories (overrides the "parent" flag)`)
 	f.StringArrayVarP(&backupOptions.Excludes, "exclude", "e", nil, "exclude a `pattern` (can be specified multiple times)")
 	f.StringArrayVar(&backupOptions.InsensitiveExcludes, "iexclude", nil, "same as --exclude `pattern` but ignores the casing of filenames")
@@ -471,28 +471,31 @@ func collectTargets(opts BackupOptions, args []string) (targets []string, err er
 
 // parent returns the ID of the parent snapshot. If there is none, nil is
 // returned.
-func findParentSnapshot(ctx context.Context, repo restic.Repository, opts BackupOptions, targets []string) (parentID *restic.ID, err error) {
-	// Force using a parent
-	if !opts.Force && opts.Parent != "" {
-		id, err := restic.FindSnapshot(ctx, repo, opts.Parent)
-		if err != nil {
-			return nil, errors.Fatalf("invalid id %q: %v", opts.Parent, err)
-		}
+func findParentSnapshots(ctx context.Context, repo restic.Repository, opts BackupOptions, targets []string) (parentIDs restic.IDs, err error) {
 
-		parentID = &id
+	if opts.Force {
+		return parentIDs, nil
 	}
 
-	// Find last snapshot to set it as parent, if not already set
-	if !opts.Force && parentID == nil {
-		id, err := restic.FindLatestSnapshot(ctx, repo, targets, []restic.TagList{}, []string{opts.Host})
-		if err == nil {
-			parentID = &id
-		} else if err != restic.ErrNoSnapshotFound {
+	// Process given parents
+	for _, p := range opts.Parents {
+		id, err := restic.FindSnapshot(ctx, repo, p)
+		if err != nil {
+			return nil, errors.Fatalf("invalid id %q: %v", p, err)
+		}
+		parentIDs = append(parentIDs, id)
+	}
+
+	// Find suitable parent snapshots, if no parents are given
+	if parentIDs == nil {
+		ids, err := restic.FindParentSnapshots(ctx, repo, targets, opts.Host)
+		if err != nil {
 			return nil, err
 		}
+		return ids, nil
 	}
 
-	return parentID, nil
+	return parentIDs, nil
 }
 
 func runBackup(opts BackupOptions, gopts GlobalOptions, term *termstatus.Terminal, args []string) error {
@@ -526,7 +529,7 @@ func runBackup(opts BackupOptions, gopts GlobalOptions, term *termstatus.Termina
 	}
 
 	type ArchiveProgressReporter interface {
-		CompleteItem(item string, previous, current *restic.Node, s archiver.ItemStats, d time.Duration)
+		CompleteItem(item string, previous []*restic.Node, current *restic.Node, s archiver.ItemStats, d time.Duration)
 		StartFile(filename string)
 		CompleteBlob(filename string, bytes uint64)
 		ScannerError(item string, fi os.FileInfo, err error) error
@@ -594,14 +597,14 @@ func runBackup(opts BackupOptions, gopts GlobalOptions, term *termstatus.Termina
 		return err
 	}
 
-	parentSnapshotID, err := findParentSnapshot(gopts.ctx, repo, opts, targets)
+	parentSnapshotIDs, err := findParentSnapshots(gopts.ctx, repo, opts, targets)
 	if err != nil {
 		return err
 	}
 
 	if !gopts.JSON {
-		if parentSnapshotID != nil {
-			p.P("using parent snapshot %v\n", parentSnapshotID.Str())
+		if len(parentSnapshotIDs) > 0 {
+			p.P("using parent snapshots %v\n", parentSnapshotIDs)
 		} else {
 			p.P("no parent snapshot found, will read all files\n")
 		}
@@ -692,16 +695,12 @@ func runBackup(opts BackupOptions, gopts GlobalOptions, term *termstatus.Termina
 		arch.ChangeIgnoreFlags |= archiver.ChangeIgnoreCtime
 	}
 
-	if parentSnapshotID == nil {
-		parentSnapshotID = &restic.ID{}
-	}
-
 	snapshotOpts := archiver.SnapshotOptions{
-		Excludes:       opts.Excludes,
-		Tags:           opts.Tags.Flatten(),
-		Time:           timeStamp,
-		Hostname:       opts.Host,
-		ParentSnapshot: *parentSnapshotID,
+		Excludes:        opts.Excludes,
+		Tags:            opts.Tags.Flatten(),
+		Time:            timeStamp,
+		Hostname:        opts.Host,
+		ParentSnapshots: parentSnapshotIDs,
 	}
 
 	if !gopts.JSON {
