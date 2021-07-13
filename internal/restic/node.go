@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/user"
+	"path/filepath"
 	"strconv"
 	"sync"
 	"syscall"
@@ -295,11 +296,37 @@ func (node Node) writeNodeContent(ctx context.Context, repo Repository, f *os.Fi
 }
 
 func (node Node) createSymlinkAt(path string) error {
-	// Windows does not allow non-admins to create soft links.
+
+	linkTarget := node.LinkTarget
+
+	// Windows does not allow processes withouth SeCreateSymbolicLinkPrivilege
+	// to create symbolic links (on most systems this are all non-admin users).
 	if runtime.GOOS == "windows" {
-		return nil
+		isAllowedToSymlink, err := isAllowedToSymlink()
+
+		if err != nil {
+			debug.Log("failed to check if user has admin privileges: %v", err)
+			return err
+		}
+
+		if !isAllowedToSymlink {
+			return errors.Errorf(
+				"can't restore symlink to %v without "+
+					"SeCreateSymbolicLinkPrivilege privileges on windows. "+
+					"current user either needs privileges or run as admin.",
+				path,
+			)
+		}
+
+		// fix path so a restore to a different location will produce
+		// consistent data
+		if !filepath.IsAbs(node.LinkTarget) {
+			pathDir := filepath.Dir(path)
+			linkTarget = filepath.Join(pathDir, node.LinkTarget)
+		}
 	}
-	err := fs.Symlink(node.LinkTarget, path)
+
+	err := fs.Symlink(linkTarget, path)
 	if err != nil {
 		return errors.Wrap(err, "Symlink")
 	}
